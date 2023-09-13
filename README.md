@@ -27,13 +27,19 @@ Our project replace the hash function in the [InstantNGP](https://nvlabs.github.
 ## Results:
 This GIF shows the results of the model trained on the strawberry image, (each frame is an epoch of training):
 
-<div style="
+Result (PSNR: **20.331**, MSE: **0.01198**):  
+<img src="./src/strawberry.gif" alt="Strawberry GIF" width="auto" height="400" />
+
+Original image:  
+<img src="./images/strawberry.jpeg" alt="Strawberry GIF" width="auto" height="400" />
+
+<!-- <div style="
     display: flex;
     align-content: space-between;
     justify-content: space-around;
 ">
     <div style="
-        /* position: relative; */
+        position: relative;
         text-align: center;
         color: white;
     ">
@@ -46,7 +52,7 @@ This GIF shows the results of the model trained on the strawberry image, (each f
         <img src="./src/strawberry.gif" alt="Strawberry GIF" width="auto" height="400" />
     </div>
     <div style="
-        /* position: relative; */
+        position: relative;
         text-align: center;
         color: white;
     ">
@@ -58,4 +64,4 @@ This GIF shows the results of the model trained on the strawberry image, (each f
         ">Original image</p>
         <img src="./images/strawberry.jpeg" alt="Strawberry GIF" width="auto" height="400" />
     </div>
-</div>
+</div> -->
