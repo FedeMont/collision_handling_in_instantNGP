@@ -1,5 +1,5 @@
 # should save the model's parameters and the optimizer state?
-should_save_params = False                             #@param {type: "boolean"}
+should_save_params = True                             #@param {type: "boolean"}
 
 # should BatchNorm the input coordinates or just divide them by max(w, h)?
 should_batchnorm_data = False                           #@param {type: "boolean"}
@@ -17,7 +17,7 @@ should_softmax_topk_features = True                    #@param {type: "boolean"}
 should_leaky_relu = False                               #@param {type: "boolean"}
 
 # should use hash function or HPD?
-should_use_hash_function = True                        #@param {type: "boolean"}
+should_use_hash_function = False                        #@param {type: "boolean"}
 
 # should log the allocated memory or not?
 should_log_allocated_memory = False                     #@param{type: "boolean"}

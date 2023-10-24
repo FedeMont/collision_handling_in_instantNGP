@@ -10,13 +10,15 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Run General Gauge Neural Fields.')
     parser.add_argument('-f', '--filename', type=str, default="strawberry.jpeg", help='Name and extension of the image file to be used (image should be in "./images" directory).')
-    parser.add_argument('--should_bw', type=bool, default=False, help='Whether the image should be converted to black and white.')
+    parser.add_argument('--should_bw', action='store_true', help='Whether the image should be converted to black and white.')
     parser.add_argument('-s', '--start_id_param', type=int, default=0, help='The id of the first parameter to be used in the grid search.')
     parser.add_argument('-e', '--end_id_param', type=int, default=None, help='The id of the last parameter to be used in the grid search.')
-    parser.add_argument('-t', '--is_test', type=bool, default=True, help='If False will log data on wandb.')
+    parser.add_argument('-t', '--is_test', action='store_true', help='If False will log data on wandb.')
     parser.add_argument('--wandb_entity', type=str, default="dl_project_bussola-fasoli-montagna", help='The entity to be used in wandb.')
     parser.add_argument('--wandb_project', type=str, default="cv_project_final_grid_search", help='The project where to log wandb.')
     parser.add_argument('--wandb_name', type=str, default=None, help='The name of the wandb run (only works if start_id_param == end_id_param).')
+    parser.add_argument('-ewp', '--encoding_weights_path', type=str, default=None, help='The path to the pretrained encoding model (default is None).')
+    parser.add_argument('-hwp', '--hpd_weights_path', type=str, default=None, help='The path to the pretrained hpd model (default is None).')
 
     args = parser.parse_args()
 
@@ -33,6 +35,9 @@ if __name__ == '__main__':
     wandb_entity = args.wandb_entity
     wandb_project = args.wandb_project
     wandb_name = args.wandb_name if (args.start_id_param == args.end_id_param) else None
+
+    encoding_weights_path = args.encoding_weights_path
+    HPD_weights_path = args.hpd_weights_path
 
     dataset: MyDataset = MyDataset(
         root=".",
@@ -73,7 +78,9 @@ if __name__ == '__main__':
         is_test_only=is_test_only,
         wandb_entity=wandb_entity,
         wandb_project=wandb_project,
-        wandb_name=wandb_name
+        wandb_name=wandb_name,
+        HPD_weights_path=HPD_weights_path,
+        encoding_weights_path=encoding_weights_path
     )
 
     del shuffled_indices

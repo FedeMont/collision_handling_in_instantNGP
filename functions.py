@@ -20,7 +20,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.autograd.profiler as profiler
 
-from torchinfo import summary
+# from torchinfo import summary
 
 from einops import rearrange, reduce, repeat
 
@@ -494,7 +494,9 @@ def grid_search_loop(
     wandb_entity: str = "dl_project_bussola-fasoli-montagna",
     wandb_project: str = "cv_project_final_grid_search",
     wandb_name: str = None,
-    drive_folder: str = "./"
+    drive_folder: str = "./",
+    HPD_weights_path: str = None,
+    encoding_weights_path: str = None,
 ):
     end_id_param = end_id_param if end_id_param != None else len(filtered_grid_search)
     
@@ -548,7 +550,9 @@ def grid_search_loop(
             topk_k=topk_k,
             should_keep_topk_only=should_keep_topk_only,
             should_bw=should_bw,
-            should_log=False                                   #@param {type: "boolean"}
+            should_log=False,                                   #@param {type: "boolean"}
+            HPD_weights_path=HPD_weights_path,
+            encoding_weights_path=encoding_weights_path
         )
 
         # print(summary(GGNF_model, list(x.shape)))
@@ -645,6 +649,7 @@ def grid_search_loop(
 
         best_psnr = 0
 
+        check_last2_collisions = []
         for e in pbar:
             train_loss, train_img, collisions, min_possible_collisions, counts_per_level, mse_loss, js_kl_div_losses, collisions_losses, indices_per_level = train_step(
                 net=GGNF_model,
@@ -673,7 +678,16 @@ def grid_search_loop(
             previous_collisions = collisions
             previous_min_possible_collisions = min_possible_collisions
 
-            train_accuracy = calc_accuracy(train_img, og_image, w*h)
+            # Go to next grid search param if collisions at last 2 levels are 0 from the beginnig
+            if e != 0 and len(check_last2_collisions) < 10:
+                # print(collisions)
+                check_last2_collisions.append((np.array(collisions[-2:].detach().cpu().numpy() == [0, 0]).all()))
+                if len(check_last2_collisions) == 10 and np.array(check_last2_collisions).all():
+                    should_show_counts = True
+                    print("!!! Stopping at epoch:", e, " because of 0 collisions!!!")
+                    early_stopper.early_stop = True
+
+            train_accuracy = calc_accuracy(train_img, og_image, w*h*(1 if should_bw else 3))
 
             train_psnr = calc_psnr(train_img, og_image)
 
@@ -747,14 +761,36 @@ def grid_search_loop(
             if train_psnr >= best_psnr and should_save_params:
                 best_psnr = train_psnr
 
-                os.makedirs(os.path.join(os.path.join(drive_folder, 'weights')), exist_ok=True)
+                os.makedirs(os.path.join(os.path.join(drive_folder, os.path.join('weights', f"{id_param}_{time}"))), exist_ok=True)
 
-                print("Saving model")
-                torch.save(GGNF_model.state_dict(), os.path.join(os.path.join(drive_folder, os.path.join('weights', f"{id_param}_{time}")), f"model_{e}.pt"))
-                torch.save(optimizer.state_dict(), os.path.join(os.path.join(drive_folder, os.path.join('weights', f"{id_param}_{time}")), f'opt_{e}.pt'))
-                print("="*80)
+                # print("Saving whole model")
+                torch.save(GGNF_model.state_dict(), os.path.join(os.path.join(drive_folder, os.path.join('weights', f"{id_param}_{time}")), f"whole_model.pt"))
+                torch.save(optimizer.state_dict(), os.path.join(os.path.join(drive_folder, os.path.join('weights', f"{id_param}_{time}")), f'whole_opt.pt'))
+                # print("="*80)
+
+                # print("Saving encoding")
+                torch.save(GGNF_model.encoding.state_dict(), os.path.join(os.path.join(drive_folder, os.path.join('weights', f"{id_param}_{time}")), f"encoding_model.pt"))
+                # print("="*80)
+
+                # print("Saving HPD")
+                torch.save(GGNF_model.HPD.state_dict(), os.path.join(os.path.join(drive_folder, os.path.join('weights', f"{id_param}_{time}")), f"HPD_model.pt"))
+                # print("="*80)
+
+                # print("Saving MLP")
+                torch.save(GGNF_model.mlp.state_dict(), os.path.join(os.path.join(drive_folder, os.path.join('weights', f"{id_param}_{time}")), f"MLP_model.pt"))
+                # print("="*80)
 
             if early_stopper.early_stop:
+                del train_img
+                del train_loss
+                del train_accuracy
+                del train_psnr
+                del collisions
+                del counts_per_level
+                del js_kl_div_losses
+                del collisions_losses
+                del mse_loss
+                del indices_per_level
                 break
 
             if e != 0:

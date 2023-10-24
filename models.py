@@ -252,6 +252,8 @@ class GeneralNeuralGaugeFields(nn.Module):
         should_keep_topk_only: bool = False,
         should_bw: bool = False,
         should_log: bool = False,
+        HPD_weights_path: str = None,
+        encoding_weights_path: str = None,
     ):
         """
 
@@ -281,6 +283,10 @@ class GeneralNeuralGaugeFields(nn.Module):
             If image should be black & white the output feature of the last layer will be 1 instead of 3 (default is False)
         should_log : bool, optional
             Wether or not to log the outputs (default False)
+        HPD_weights_path : str, optional
+            The path to the pretrained HPD model (default is None)
+        encoding_weights_path : str, optional
+            The path to the pretrained encoding model (default is None)
         """
 
         super(GeneralNeuralGaugeFields, self).__init__()
@@ -353,6 +359,16 @@ class GeneralNeuralGaugeFields(nn.Module):
             )
             print2(("HPD:", self.HPD), self._should_log)
             print2(("#PARAMETERS:", [(name[0], param.numel()) for name, param in zip(self.HPD.named_parameters(), self.HPD.parameters())]), self._should_log)
+            
+            # load weights to HPD
+            if HPD_weights_path is not None:
+                self.HPD.load_state_dict(torch.load(HPD_weights_path))
+
+                print("Loaded")
+                # freeze weights
+                for name, param in self.HPD.named_parameters():
+                    param.requires_grad = False
+                    print(name, param.requires_grad)
             # end
 
         self.encoding = MultiResHashEncoding(
@@ -364,7 +380,6 @@ class GeneralNeuralGaugeFields(nn.Module):
         )
 
         self._MLP_hidden_layers_widths = [self._num_levels * self._feature_dim, *MLP_hidden_layers_widths, (3 if not should_bw else 1)]
-        # self._MLP_hidden_layers_widths.append(3 if not should_bw else 1)
 
         self.mlp = torch.nn.ModuleList([
             torch.nn.Sequential(
