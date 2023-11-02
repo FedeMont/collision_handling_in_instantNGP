@@ -1,0 +1,14 @@
+numpy
+opencv-python
+Pillow
+matplotlib
+scipy
+torch
+torchvision
+einops
+torchinfo
+wandb
+tqdm
+ipykernel
+backports.zoneinfo
+scikit-learn

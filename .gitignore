@@ -1,3 +1,10 @@
+# Python venv
+project_course/
+
+# Wandb
+.wandb_apikey.txt
+wandb/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
