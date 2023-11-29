@@ -10,5 +10,4 @@ torchinfo
 wandb
 tqdm
 ipykernel
-backports.zoneinfo
 scikit-learn
