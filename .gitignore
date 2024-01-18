@@ -1,6 +1,8 @@
 # Python venv
 project_course/
 
+*.pth
+
 # Wandb
 .wandb_apikey.txt
 wandb/
