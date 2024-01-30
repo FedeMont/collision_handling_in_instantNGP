@@ -1,6 +1,7 @@
 # Python venv
 project_course/
 
+weights/
 *.pth
 
 # Wandb
