@@ -1,0 +1,141 @@
+time: (datetime.now(ZoneInfo("Europe/Rome"))).strftime("%Y%m%d%H%M%S")
+
+log_flags:
+  allocated_memory: false
+  dataset: false # false or list of decoded functions to log
+    # - 0
+    # - 2
+    # - 4
+    # - 5
+  learnable_hash_model: false # false or list of decoded functions to log
+    # - 2
+    # - 3
+  multiresolution_model: false # false or list of decoded functions to log
+  gngf_model: false # false or list of decoded functions to log
+    # - 1
+    # - 3
+  loss: false # false or list of decoded functions to log
+    # - 1
+    # - 2
+    # - 3
+  save_checkpoint: false
+  load_checkpoint: false
+  train: #false # false or list of decoded functions to log
+    # - 0
+    # - 2
+    - 3
+  test: false # false or list of decoded functions to log
+    # - 0
+  wandb: false # false or list of decoded functions to log
+    # - 1
+
+flags:
+  should_wandb: true #! if epochs < 100 this should be false
+  should_fast_hash: false # TODO: maybe change to should_static_hash
+  should_learn_images: true #! if should_fast_hash is true, this should be true
+  should_continue_training: false #! if true, load_weights_path should be not null
+  should_use_pretrained: false #! if true, load_weights_path should be not null
+
+train_params:
+  epochs: 1 # if should_continue_training is true, this are the additional epochs
+  random_seed: 31504 # null for random seed
+  
+  dataset:
+    images_paths: # images should all have the same dimensions, if not the smallest one will be padded
+      - "./images/silhouette_1.jpg"
+      # - "./images/silhouette_2.jpg"
+      # - "./images/silhouette_3.jpg"
+      # - "./images/strawberry_small.jpg"
+      # - "./images/strawberry.jpeg"
+      # - "./images/macaw2.jpg"
+    input_indexing: "ij"
+    n_min: 8
+    n_max: 32
+    num_levels: 4
+    hash_table_size: 2**8
+    train_test_split: 0.8
+    should_randomize_input: false # not yet implemented
+    # TODO Maybe change to should_center_input_origin
+    should_normalize_input: true # TODO should this be false if flags->should_fast_hash is true?
+
+  learnable_hash_model:
+    prime_numbers: # this would be ignored if flags->should_fast_hash is false
+      - 1
+      - 2654435761
+      - 805459861
+    should_calc_collisions: true
+    should_use_all_levels: true #! if should_fast_hash is true, this should be true
+    should_normalize_grid_coords: false #! if either should_normalize or should_fast_hash are true, this should be false
+    #! if should_fast_hash is true, these are ignored
+    hidden_layers_widths:
+      - 8
+      - 8
+    output_size: 2
+    sigmas_scale: 1.0
+    hidden_layers_activation: torch.nn.GELU()
+    dropout_rate: null # null for no dropout # not yet implemented
+    weights_initialization: torch.nn.init.xavier_normal_ # null for default init, torch.nn.init.xavier_uniform_, torch.nn.init.xavier_normal_, torch.nn.init.kaiming_uniform_, torch.nn.init.kaiming_normal_
+    optimizer: torch.optim.AdamW
+    lr: 1e-3
+    weight_decay: 0e0
+    betas: 
+      - 0.9
+      - 0.999
+    eps: 1e-8
+    scheduler: 
+      name: null #CosineAnnealingLR # null for no scheduler, CosineAnnealingLR, CosineAnnealingWarmRestarts, StepLR 
+      step_size: -1 #! if -1, step_size == epochs
+      gamma_eta_min: 0e0 # this param is gamma if scheduler requires gamma or eta_min if scheduler requires eta_min
+      stop_epoch: -1 #! if -1, stop_epoch == epochs
+    # TODO Fix this value should null but eval returns an error
+    gradient_clip: "None" # null for no clip
+  
+  gngf_model: #! if should_learn_images is false, these are ignored
+    hidden_layers_widths:
+      - 64
+      - 64
+    feature_size: 2
+    topk: 5 #! if should_fast_hash is true, this should be 1
+    optimizer: torch.optim.Adam
+    features: 
+      lr: 1e-3
+      weight_decay: 0e0
+    mlp:
+      lr: 1e-2
+      weight_decay: 1e-6
+    betas: 
+      - 0.9
+      - 0.99
+    eps: 1e-15
+    should_circular_topk: true 
+
+  loss:
+    kl_div_reduction: "batchmean"
+    excluded_params_from_reg_loss:
+      - "_prime_numbers"
+      - "hash_tables"
+      - "mlp"
+    norm_regularization_order: 2
+    should_exp_normalize_kl_div: true
+    # TODO maybe different lambdas for each level
+    should_give_different_level_importances: true #! if should_fast_hash is true, this should be false
+    lambda_kl_div: 0e0 #! if should_fast_hash is true, this should be 0
+    lambda_sigmas: 0e0 #! if should_fast_hash is true, this should be 0
+    lambda_images: 1e2 #! if should_learn_images is false, this should be 0
+    lambda_reg: 1e-2 #! if should_fast_hash is true, this should be 0
+
+  early_stopper:
+    tolerance: -1 #! if -1, tolerance == epochs
+    min_delta: 1e-6
+
+  drawing_rate: 50
+
+  save_weights_rate: 1 # null for no save
+  save_weights_path: "./weights"
+  load_weights_path: null #"./weights/20240304160002/20240304160002_last_checkpoint.pth" # null for no load
+
+wandb:
+  entity: "fedemonti00"
+  project: "project_course_new_refactor"
+  name: "random_try3" #! if null, it will be same as time
+

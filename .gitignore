@@ -1,12 +1,15 @@
 # Python venv
 project_course/
 
-weights/
+*weights/
 *.pth
 
 # Wandb
 .wandb_apikey.txt
 wandb/
+
+# Vscode
+.vscode
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
