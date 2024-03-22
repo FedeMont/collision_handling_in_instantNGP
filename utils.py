@@ -19,11 +19,12 @@ def config_apply_rules(config: Dict[str, Any]) -> Dict[str, Any]:
         config_copy["train_params"]["learnable_hash_model"]["should_normalize_grid_coords"] = False
     
         config_copy["train_params"]["gngf_model"]["topk"] = 1
+        config_copy["train_params"]["gngf_model"]["should_score_gradient_estimator"] = False
 
         config_copy["train_params"]["loss"]["lambda_kl_div"] = 0
         config_copy["train_params"]["loss"]["lambda_sigmas"] = 0
         config_copy["train_params"]["loss"]["lambda_reg"] = 0
-        config_copy["train_params"]["loss"]["should_give_different_level_importance"] = False
+        config_copy["train_params"]["loss"]["should_give_different_level_importances"] = False
         
     else: # not should_fat_hash
         del config_copy["train_params"]["learnable_hash_model"]["prime_numbers"]
@@ -79,6 +80,7 @@ class Loss(nn.Module):
         lambda_sigmas: Optional[float] = 1,
         lambda_images: Optional[float] = 1,
         lambda_reg: Optional[float] = 1,
+        lambda_indices_log_probs: Optional[float] = 1,
         should_exp_normalize_kl_div: Optional[bool] = False,
         should_give_different_level_importances: Optional[bool] = False,
         device: Optional[torch.device | str] = "cpu",
@@ -108,6 +110,8 @@ class Loss(nn.Module):
             Weight for the images loss.
         lambda_reg : float, optional (default is 1)
             Weight for the regularization loss.
+        lambda_indices_log_probs : float, optional (default is 1)
+            Weight for the indices log probs loss.
         should_exp_normalize_kl_div : bool, optional (default is False)
             Whether to normalize the KL divergence or not.
         should_give_different_level_importances : bool, optional (default is False)
@@ -134,6 +138,7 @@ class Loss(nn.Module):
         self._lambda_sigmas: float = eval(kwargs.get("lambda_sigmas", str(lambda_sigmas)))
         self._lambda_images: float = eval(kwargs.get("lambda_images", str(lambda_images)))
         self._lambda_reg: float = eval(kwargs.get("lambda_reg", str(lambda_reg)))
+        self._lambda_indices_log_probs: float = eval(kwargs.get("lambda_indices_log_probs", str(lambda_indices_log_probs)))
 
         self._should_exp_normalize_kl_div: bool = kwargs.get("should_exp_normalize_kl_div", should_exp_normalize_kl_div)
         self._should_give_different_level_importances: bool = kwargs.get("should_give_different_level_importances", should_give_different_level_importances)
@@ -145,6 +150,7 @@ class Loss(nn.Module):
 
     def forward(
         self,
+        indices_log_probs: torch.Tensor | None,
         indices: torch.Tensor | List[torch.Tensor],
         sigmas: torch.Tensor | List[torch.Tensor],
         min_possible_collisions_per_level: torch.Tensor,
@@ -193,7 +199,13 @@ class Loss(nn.Module):
         
         images_losses: torch.Tensor | None = None
         if images_pred is not None:
+            # log(("images_pred:", images_pred.shape, images_pred.requires_grad, images_pred.is_leaf), self._should_log)
+            # log(("images_target:", images_target.shape, images_target.requires_grad, images_target.is_leaf), self._should_log)
+
             images_losses: torch.Tensor = torch.stack([
+                # (
+                #     indices_log_probs[b] * (images_target[b] - images_pred[b]).square()
+                # ).mean()
                 self._MSE(images_pred[b], images_target[b])
                 for b in range(images_pred.shape[0])
             ])
@@ -208,9 +220,13 @@ class Loss(nn.Module):
         if self._should_give_different_level_importances:
             level_importances = torch.exp(torch.arange(levels, 0, step=-1, device=self._device))
 
+        indices_log_probs_loss: torch.Tensor = indices_log_probs.mean()
+        log(("indices_log_probs_loss:", indices_log_probs_loss, indices_log_probs_loss.shape, indices_log_probs.requires_grad, indices_log_probs.is_leaf), self._should_log)
+        
         loss: torch.Tensor = (
             # (self._lambda_kl_div * torch.sum(level_importances * kl_div_losses)) +
-            # (self._lambda_sigmas * torch.sum(level_importances * sigmas_losses)) +
+            (self._lambda_sigmas * torch.sum(level_importances * sigmas_losses)) +
+            (self._lambda_indices_log_probs * indices_log_probs_loss) +
             (
                 self._lambda_images * torch.sum(images_losses)
                 if images_losses is not None
@@ -224,6 +240,7 @@ class Loss(nn.Module):
             "sigmas_losses": sigmas_losses,
             "images_losses": images_losses,
             "reg_loss": reg_loss,
+            "indices_log_probs_loss": indices_log_probs_loss,
             "loss": loss,
             "hists": histograms
         }

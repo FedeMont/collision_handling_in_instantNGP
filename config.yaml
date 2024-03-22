@@ -20,10 +20,10 @@ log_flags:
     # - 3
   save_checkpoint: false
   load_checkpoint: false
-  train: #false # false or list of decoded functions to log
+  train: false # false or list of decoded functions to log
     # - 0
     # - 2
-    - 3
+    # - 3
   test: false # false or list of decoded functions to log
     # - 0
   wandb: false # false or list of decoded functions to log
@@ -31,21 +31,21 @@ log_flags:
 
 flags:
   should_wandb: true #! if epochs < 100 this should be false
-  should_fast_hash: false # TODO: maybe change to should_static_hash
+  should_fast_hash: false  # TODO: maybe change to should_static_hash
   should_learn_images: true #! if should_fast_hash is true, this should be true
   should_continue_training: false #! if true, load_weights_path should be not null
   should_use_pretrained: false #! if true, load_weights_path should be not null
 
 train_params:
-  epochs: 1 # if should_continue_training is true, this are the additional epochs
-  random_seed: 31504 # null for random seed
+  epochs: 5000 # if should_continue_training is true, this are the additional epochs
+  random_seed: null # null for random seed
   
   dataset:
     images_paths: # images should all have the same dimensions, if not the smallest one will be padded
-      - "./images/silhouette_1.jpg"
+      # - "./images/silhouette_1.jpg"
       # - "./images/silhouette_2.jpg"
       # - "./images/silhouette_3.jpg"
-      # - "./images/strawberry_small.jpg"
+      - "./images/strawberry_small.jpg"
       # - "./images/strawberry.jpeg"
       # - "./images/macaw2.jpg"
     input_indexing: "ij"
@@ -56,7 +56,7 @@ train_params:
     train_test_split: 0.8
     should_randomize_input: false # not yet implemented
     # TODO Maybe change to should_center_input_origin
-    should_normalize_input: true # TODO should this be false if flags->should_fast_hash is true?
+    should_normalize_input: false # TODO should this be false if flags->should_fast_hash is true?
 
   learnable_hash_model:
     prime_numbers: # this would be ignored if flags->should_fast_hash is false
@@ -64,7 +64,7 @@ train_params:
       - 2654435761
       - 805459861
     should_calc_collisions: true
-    should_use_all_levels: true #! if should_fast_hash is true, this should be true
+    should_use_all_levels: false #! if should_fast_hash is true, this should be true
     should_normalize_grid_coords: false #! if either should_normalize or should_fast_hash are true, this should be false
     #! if should_fast_hash is true, these are ignored
     hidden_layers_widths:
@@ -95,19 +95,20 @@ train_params:
       - 64
       - 64
     feature_size: 2
-    topk: 5 #! if should_fast_hash is true, this should be 1
+    topk: -1 #! if should_fast_hash is true, this should be 1
     optimizer: torch.optim.Adam
     features: 
       lr: 1e-3
       weight_decay: 0e0
     mlp:
-      lr: 1e-2
+      lr: 1e-3
       weight_decay: 1e-6
     betas: 
       - 0.9
       - 0.99
     eps: 1e-15
-    should_circular_topk: true 
+    should_circular_topk: true
+    should_score_gradient_estimator: true #! if should_fast_hash is true, this should be false
 
   loss:
     kl_div_reduction: "batchmean"
@@ -116,13 +117,14 @@ train_params:
       - "hash_tables"
       - "mlp"
     norm_regularization_order: 2
-    should_exp_normalize_kl_div: true
+    should_exp_normalize_kl_div: false
     # TODO maybe different lambdas for each level
-    should_give_different_level_importances: true #! if should_fast_hash is true, this should be false
+    should_give_different_level_importances: false #! if should_fast_hash is true, this should be false
     lambda_kl_div: 0e0 #! if should_fast_hash is true, this should be 0
-    lambda_sigmas: 0e0 #! if should_fast_hash is true, this should be 0
+    lambda_sigmas: 1e-1 #! if should_fast_hash is true, this should be 0
     lambda_images: 1e2 #! if should_learn_images is false, this should be 0
     lambda_reg: 1e-2 #! if should_fast_hash is true, this should be 0
+    lambda_indices_log_probs: 5e-1
 
   early_stopper:
     tolerance: -1 #! if -1, tolerance == epochs
@@ -136,6 +138,6 @@ train_params:
 
 wandb:
   entity: "fedemonti00"
-  project: "project_course_new_refactor"
-  name: "random_try3" #! if null, it will be same as time
+  project: "project_course_report"
+  name: null #! if null, it will be same as time
 

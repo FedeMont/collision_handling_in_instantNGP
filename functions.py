@@ -59,6 +59,9 @@ if torch.cuda.is_available():
     print(f"Current device {torch.cuda.current_device()}:", torch.cuda.get_device_name(torch.cuda.current_device()))
 
 # torch.set_default_device(device)
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+os.environ["TORCH_USE_CUDA_DSA"] = "1"
+
 # ------------ #
 
 plt.style.use("ggplot")
@@ -277,38 +280,45 @@ def differentiable_histogram(
 class DifferentiableIndexing(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, indices, indexing_fn: callable):
-        ctx.save_for_backward(indices)
+        should_log: bool = False
+
+        ctx.save_for_backward(input, indices)
         ctx.indexing_fn = indexing_fn
 
         try:
-            log(("input:", input.shape, input.requires_grad, input.is_leaf), True, color=bcolors.HEADER)
+            log(("input:", input.shape, input.requires_grad, input.is_leaf), should_log, color=bcolors.HEADER)
         except:
-            log(("input:", input.weight.shape, input.weight.requires_grad, input.weight.is_leaf), True, color=bcolors.HEADER)
-        log(("indices:", indices.shape, indices.requires_grad, indices.is_leaf), True, color=bcolors.HEADER)
+            log(("input:", input.weight.shape, input.weight.requires_grad, input.weight.is_leaf), should_log, color=bcolors.HEADER)
+        log(("indices:", indices.shape, indices.requires_grad, indices.is_leaf), should_log, color=bcolors.HEADER)
 
+        # TODO - dividere in più parti, salvarsi il gradiente rispetto aglli indici e non fare backword su .long()
         output = indexing_fn.forward(input, indices.long())
 
-        log(("output:", output.shape, output.requires_grad, output.is_leaf), True, color=bcolors.HEADER)
+        # TODO - vedere se con o senza backward i gradienti sono uguali?
+
+        log(("output:", output.shape, output.requires_grad, output.is_leaf), should_log, color=bcolors.HEADER)
 
         return output
 
     @staticmethod
     def backward(ctx, grad_output):
-        indices, = ctx.saved_tensors
+        should_log: bool = False
+
+        input, indices = ctx.saved_tensors
         indexing_fn = ctx.indexing_fn
 
-        log(("grad_output:", grad_output.shape), True, color=bcolors.HEADER)
+        log(("grad_output:", grad_output.shape), should_log, color=bcolors.HEADER)
 
         # grad_input = grad_output.clone()
-        grad_input = indexing_fn.backward_input(grad_output, indices.long())
+        grad_input = indexing_fn.backward_input(input, grad_output, indices.long())
         
-        log(("grad_input:", grad_input.shape), True, color=bcolors.HEADER)
+        log(("grad_input:", grad_input.shape), should_log, color=bcolors.HEADER)
 
         # Calculate gradient with respect to learnable indices (using STE)
         grad_indices = None
         if indices.requires_grad:
             grad_indices = indexing_fn.backward_indices(grad_output, indices.long())
-            log(("grad_indices:", grad_indices.shape), True, color=bcolors.HEADER)
+            log(("grad_indices:", grad_indices.shape), should_log, color=bcolors.HEADER)
 
         return grad_input, grad_indices, None
 
@@ -350,11 +360,25 @@ class Hash_Tables_Indexing(Indexing):
         out = x[indices]
         return out
     
-    def backward_input(self, grad, indices) -> torch.Tensor:
-        return grad
+    def backward_input(self, input, grad, indices) -> torch.Tensor:
+        grad_input = torch.zeros_like(input)
+        grad_input[indices] = grad
+
+        return grad_input
 
     def backward_indices(self, grad, indices) -> torch.Tensor:
         return grad
+
+# https://ai.stackexchange.com/questions/41264/how-to-do-backpropagation-with-argmax
+def score_gradient_estimator(
+    features: torch.Tensor, 
+    indices: torch.Tensor
+) -> torch.Tensor:
+    
+    cat = torch.distributions.Categorical(logits=indices)
+    log_probs = cat.log_prob(indices.long()[..., indices.shape[-1]//2])
+    return features[indices.long()], -log_probs,
+
 # ------------------------------- #
 
 # --- Metrics --- #
@@ -616,7 +640,7 @@ def train_loop(
     for key, optimizer in optimizers.items():
         optimizer.zero_grad()
 
-    images_pred, indices, sigmas, collisions, hists = model(
+    images_pred, indices_log_probs, indices, sigmas, collisions, hists = model(
         unique_grids_per_level=unique_grids_per_level,
         min_possible_collisions_per_level=min_possible_collisions_per_level,
         scaled_coords=scaled_coords,
@@ -627,6 +651,7 @@ def train_loop(
     )
 
     losses_results = loss_fn(
+        indices_log_probs=indices_log_probs,
         indices=(
             indices 
             if isinstance(indices, list) 
@@ -648,6 +673,8 @@ def train_loop(
     )
 
     if (3 in should_log) if should_log else should_log:
+        indices_log_probs.retain_grad()
+
         if images_pred is not None:
             images_pred.retain_grad()
         
@@ -669,6 +696,18 @@ def train_loop(
         torch.nn.utils.clip_grad_norm_(model.learnable_hash_function_model.parameters(), gradient_clip, norm_type=2)
 
     if (3 in should_log) if should_log else should_log:
+        log(
+            (
+                "indices_log_probs gradient: ",
+                indices_log_probs.grad,
+                indices_log_probs.grad_fn,
+                indices_log_probs.shape,
+                indices_log_probs.grad.sum()
+            ),
+            True,
+            color=bcolors.OKGREEN
+        )
+
         if images_pred is not None:
             log(
                 (
@@ -757,6 +796,7 @@ def train_loop(
         "kl_div_losses": losses_results["kl_div_losses"].detach().cpu().numpy(),
         "sigmas_losses": losses_results["sigmas_losses"].detach().cpu().numpy(),
         "reg_loss": losses_results["reg_loss"],
+        "indices_log_probs_loss": losses_results["indices_log_probs_loss"],
         "images_losses": losses_results["images_losses"].detach().cpu().numpy() if losses_results["images_losses"] is not None else None,
 
         "loss": losses_results["loss"].item(),
@@ -905,7 +945,7 @@ def test_loop(
 
     model.eval()
 
-    images_pred, indices, sigmas, collisions, hists = model(
+    images_pred, indices_log_probs, indices, sigmas, collisions, hists = model(
         unique_grids_per_level=None,
         min_possible_collisions_per_level=min_possible_collisions_per_level,
         scaled_coords=scaled_coords,
@@ -917,6 +957,7 @@ def test_loop(
 
     with torch.no_grad():
         losses_results = loss_fn(
+            indices_log_probs=indices_log_probs,
             indices=rearrange(indices, "batch pixels levels verts 1 -> batch levels pixels (verts 1)")[0], # 0 because images are all of same dimensions
             sigmas=rearrange(sigmas, "batch pixels levels verts 1 -> batch levels pixels (verts 1)")[0], # 0 because images are all of same dimensions
             min_possible_collisions_per_level=min_possible_collisions_per_level,
@@ -962,6 +1003,7 @@ def test_loop(
         "kl_div_losses": losses_results["kl_div_losses"].detach().cpu().numpy(),
         "sigmas_losses": losses_results["sigmas_losses"].detach().cpu().numpy(),
         "reg_loss": losses_results["reg_loss"],
+        "indices_log_probs_loss": losses_results["indices_log_probs_loss"],
         "images_losses": losses_results["images_losses"].detach().cpu().numpy() if losses_results["images_losses"] is not None else None,
 
         "indices_mappings": indices_mappings,

@@ -284,6 +284,7 @@ class GNGFModel(nn.Module):
         hash_table_size: Optional[int | None] = None,
         should_circular_topk: Optional[bool] = True,
         should_learn_images: Optional[bool] = False,
+        should_score_gradient_estimator: Optional[bool] = False,
         should_log: Optional[List | bool] = False,
         device: Optional[torch.device | str] = "cpu",
         **kwargs
@@ -310,6 +311,8 @@ class GNGFModel(nn.Module):
             Whether to use circular topk or not.
         should_learn_images : bool, optional (default is False)
             Whether to learn the images or not.
+        should_score_gradient_estimator : bool, optional (default is False)
+            Whether to use score gradient estimator to perform features indexing backward or not.
         should_log : List | bool, optional (default is False)
             List of decoded functions to log or False to not log.
         device : torch.device | str, optional (default is "cpu")
@@ -337,6 +340,7 @@ class GNGFModel(nn.Module):
             self._hash_table_size: int = kwargs.get("hash_table_size", hash_table_size)
 
             self._should_circular_topk: bool = kwargs.get("should_circular_topk", should_circular_topk)
+            self._should_score_gradient_estimator: bool = kwargs.get("should_score_gradient_estimator", should_score_gradient_estimator)
 
             self.hash_tables: torch.nn.ModuleList = torch.nn.ModuleList([
                 torch.nn.ModuleList([
@@ -393,8 +397,8 @@ class GNGFModel(nn.Module):
         should_show_hists: bool = False,
     ) -> Tuple[
         torch.Tensor | None, 
-        torch.Tensor, 
-        torch.Tensor, 
+        torch.Tensor | None, 
+        torch.Tensor,
         torch.Tensor, 
         torch.Tensor | None, 
         List[plt.Figure] | None
@@ -422,10 +426,11 @@ class GNGFModel(nn.Module):
                 log(("sigmas:", sigmas, sigmas.shape, sigmas.requires_grad, sigmas.is_leaf), self._should_log)
 
         out = None
+        indices_log_probs = None
         if self._should_learn_images:  
             coeffs = self._calc_bilinear_coefficients(scaled_coords, grid_coords)
 
-            out = self._look_up_features(indices, sigmas)
+            out, indices_log_probs = self._look_up_features(indices, sigmas)
 
             out = self._bilinear_interpolation(out, coeffs)
             del coeffs
@@ -434,7 +439,7 @@ class GNGFModel(nn.Module):
                 out = layer(out)
                 log((f"After layer {i}:", out, out.shape, out.requires_grad, out.is_leaf), self._should_log)
 
-        return out, indices, sigmas, collisions, hists
+        return out, indices_log_probs, indices, sigmas, collisions, hists
     
     @torch.no_grad()
     def _calc_bilinear_coefficients(self, scaled_coords: torch.Tensor, grid_coords: torch.Tensor) -> torch.Tensor:
@@ -478,7 +483,11 @@ class GNGFModel(nn.Module):
 
         return coeffs
 
-    def _look_up_features(self, indices: torch.Tensor, sigmas: torch.Tensor) -> torch.Tensor:
+    def _look_up_features(
+        self, 
+        indices: torch.Tensor, 
+        sigmas: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Looks up features from the hash tables.
 
@@ -491,8 +500,9 @@ class GNGFModel(nn.Module):
 
         Returns
         -------
-        torch.Tensor
-            Looked up features.
+        Tuple[torch.Tensor, torch.Tensor]
+            Looked up features, indices' scoregradientestimator log probabilities.
+            (if should_score_gradient_estimator is False, output at index 1 is a tensor of zeros)
         """
         log(("indices:", indices, indices.shape, indices.requires_grad, indices.is_leaf), self._should_log)
         log(("sigmas:", sigmas, sigmas.shape, sigmas.requires_grad, sigmas.is_leaf), self._should_log)
@@ -511,39 +521,44 @@ class GNGFModel(nn.Module):
             )
         log(("topks:", topks, topks.shape, topks.requires_grad, topks.is_leaf), self._should_log)
 
-        # indices = indices + topks
-        # if self._should_circular_topk: # CIRCULAR IMPLEMENTATION
-        #     indices = torch.remainder(indices, self._hash_table_size)
-        # else: # LINEAR IMPLEMENTATION
-        #     indices[indices < 0] = 0
-        #     indices[indices >= self._hash_table_size] = self._hash_table_size - 1
-        # log(("new_indices:", indices, indices.shape, indices.requires_grad, indices.is_leaf), self._should_log)
-        
-        # problema con self.hash_tables embeddings: 
-        # RuntimeError: function DifferentiableIndexingBackward returned a gradient different than None at position 1, but the corresponding forward input was not a Variable
-        # looked_up: torch.Tensor = DifferentiableIndexing.apply(self.hash_tables, indices, Hash_Tables_Indexing())
-        
-        # looked_up: torch.Tensor = rearrange(
-        #     torch.stack([
-        #         torch.stack([
-        #             self.hash_tables[b][l](
-        #                 x[:, l, :, :].int() # Problema molto più probabilemente qua, deve essere int per fare indexing ma facendo int si stacca il gradiente
-        #             )
-        #             for l in range(self._num_levels)
-        #         ])
-        #         for b, x in enumerate(indices)
-        #     ]),
-        #     "batch levels pixels verts k features -> batch pixels levels features verts k"
-        # )
+        indices = indices + topks
+        if self._should_circular_topk: # CIRCULAR IMPLEMENTATION
+            indices = torch.remainder(indices, self._hash_table_size)
+        else: # LINEAR IMPLEMENTATION
+            indices[indices < 0] = 0
+            indices[indices >= self._hash_table_size] = self._hash_table_size - 1
+        log(("new_indices:", indices, indices.shape, indices.requires_grad, indices.is_leaf), self._should_log)
 
         looked_up: torch.Tensor = rearrange(
-            torch.stack([
+            torch.zeros(
+                (*indices.shape, self._feature_size),
+                device=indices.device
+            ),
+            "batch pixels levels verts k features -> batch levels pixels verts k features"
+        )
+
+        indices_log_probs: torch.Tensor = torch.zeros((*indices.shape[:-1],), device=indices.device)
+        if self._should_score_gradient_estimator:
+            for b in range(indices.shape[0]):
+                for l in range(self._num_levels):
+                    values, log_probs = score_gradient_estimator(self.hash_tables[b][l].weight, indices[b, :, l, :, :])
+                    log(("values:", values, values.shape), self._should_log, color=bcolors.HEADER)
+                    log(("log_probs:", log_probs, log_probs.shape), self._should_log, color=bcolors.HEADER)
+                    looked_up[b, l, :, :, :] = values
+                    indices_log_probs[b, :, l, :] = log_probs                    
+        else:
+            looked_up: torch.Tensor = torch.stack([
                 torch.stack([
-                    DifferentiableIndexing.apply(self.hash_tables[b][l].weight, indices[b, :, l, :, :], Hash_Tables_Indexing())
+                    self.hash_tables[b][l](
+                        indices[b, :, l, :, :].long()
+                    )
                     for l in range(self._num_levels)
                 ])
                 for b in range(indices.shape[0])
-            ]),
+            ])
+
+        looked_up: torch.Tensor = rearrange(
+            looked_up,
             "batch levels pixels verts k features -> batch pixels levels features verts k"
         )
         
@@ -569,7 +584,7 @@ class GNGFModel(nn.Module):
         log(("Weighted avg looked_up:", looked_up, looked_up.shape, looked_up.requires_grad, looked_up.is_leaf), self._should_log)
         del gaussian_probs
 
-        return looked_up
+        return looked_up, indices_log_probs
 
     def _bilinear_interpolation(self, features: torch.Tensor, coeffs: torch.Tensor) -> torch.Tensor:
         """
